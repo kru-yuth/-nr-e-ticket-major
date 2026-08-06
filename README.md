@@ -41,4 +41,29 @@
    git clone [https://github.com/your-username/nr-e-ticket-major.git](https://github.com/your-username/nr-e-ticket-major.git)
    cd nr-e-ticket-major
 
-สร้างและพัฒนาด้วยวิธี vibe coding โดยนายยุทธ ขวัญเมืองแก้ว
+Install dependencies
+
+Bash
+npm install
+Environment Variables Configuration
+สร้างไฟล์ .env ไว้ที่ root ของโปรเจกต์ และกำหนดค่า API Key ต่างๆ ดังนี้:
+
+ข้อมูลโค้ด
+# Firebase Configuration
+VITE_FIREBASE_API_KEY=your_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_auth_domain
+VITE_FIREBASE_PROJECT_ID=your_project_id
+
+# EmailJS Configuration
+VITE_EMAILJS_SERVICE_ID=your_emailjs_service_id
+VITE_EMAILJS_TEMPLATE_ID=your_emailjs_template_id
+VITE_EMAILJS_PUBLIC_KEY=your_emailjs_public_key
+Run the development server
+
+Bash
+npm run dev
+(หากต้องการทดสอบระบบสแกน QR Code บนโทรศัพท์มือถือที่ใช้ Wi-Fi วงเดียวกัน ให้ใช้คำสั่ง npm run dev -- --host)
+
+📜 License
+This project is open-sourced software licensed under the GNU General Public License v3.0 (GPL-3.0)[cite: 1].
+อนุญาตให้นำซอร์สโค้ดไปศึกษา ดัดแปลง และใช้งานได้อย่างอิสระ ภายใต้เงื่อนไขว่าหากมีการนำไปพัฒนาต่อยอดและเผยแพร่ จะต้องเปิดเผยซอร์สโค้ดที่ถูกปรับปรุงให้เป็น Open Source ภายใต้ License GPL-3.0 เช่นเดียวกัน
