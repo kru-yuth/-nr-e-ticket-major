@@ -64,6 +64,7 @@ Bash
 npm run dev
 (หากต้องการทดสอบระบบสแกน QR Code บนโทรศัพท์มือถือที่ใช้ Wi-Fi วงเดียวกัน ให้ใช้คำสั่ง npm run dev -- --host)
 
-📜 License
-This project is open-sourced software licensed under the GNU General Public License v3.0 (GPL-3.0)[cite: 1].
-อนุญาตให้นำซอร์สโค้ดไปศึกษา ดัดแปลง และใช้งานได้อย่างอิสระ ภายใต้เงื่อนไขว่าหากมีการนำไปพัฒนาต่อยอดและเผยแพร่ จะต้องเปิดเผยซอร์สโค้ดที่ถูกปรับปรุงให้เป็น Open Source ภายใต้ License GPL-3.0 เช่นเดียวกัน
+## 📜 License
+
+This project is open-sourced software licensed under the **MIT License**.
+อนุญาตให้นำซอร์สโค้ดไปศึกษา ดัดแปลง และใช้งานได้อย่างอิสระ โดยต้องคงไว้ซึ่งประกาศแจ้งเตือนลิขสิทธิ์และสิทธิ์อนุญาตต้นฉบับ
