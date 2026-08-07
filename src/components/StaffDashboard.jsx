@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import emailjs from '@emailjs/browser';
 import { db, isFirebaseConfigured } from '../firebase';
 import {
   audienceLabel,
@@ -305,11 +306,19 @@ export default function StaffDashboard() {
     const newDate = editDate;
     setEditBusy(true);
     setEditError(null);
+    let updated = null;
     try {
       await runTransaction(db, async (txn) => {
         const tSnap = await txn.get(doc(db, 'tickets', ticket.ticketCode));
         if (!tSnap.exists()) throw new Error('NOT_FOUND');
         const t = tSnap.data();
+        updated = {
+          ticketCode: ticket.ticketCode,
+          name: t.name,
+          email: t.email || '',
+          seats: newSeats,
+          showDate: dateLabelOfKey(newDate),
+        };
         const oldSeats = seatListOf(t);
         const oldDate = t.showDateKey;
         const staying = new Set(oldSeats.filter((s) => newSeats.includes(s)));
@@ -357,13 +366,40 @@ export default function StaffDashboard() {
             : null,
         });
       });
+      let emailSent = false;
+      if (updated && updated.email) {
+        const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID;
+        const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID;
+        const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+        if (serviceId && templateId && publicKey) {
+          try {
+            const qrData = `NRE-TICKET|${updated.ticketCode}|${updated.seats.join('+')}|${updated.name}`;
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}`;
+            await emailjs.send(serviceId, templateId, {
+              to_name: updated.name,
+              to_email: updated.email,
+              ticket_code: updated.ticketCode,
+              qr_url: qrUrl,
+              seats: updated.seats.map((s) => String(s).replace('-', '')).join(', '),
+              show_date: updated.showDate,
+            }, { publicKey });
+            emailSent = true;
+          } catch (err) {
+            console.error('Resend E-Ticket email failed:', err);
+          }
+        }
+      }
       setNotice(
-        `✔ แก้ไขตั๋ว ${ticket.ticketCode} สำเร็จ (ที่นั่ง ${seatTextOf({
-          seats: newSeats,
-        })} · ${dateLabelOfKey(newDate)} · ${
-          editCheckedIn ? 'เช็คอินแล้ว' : 'ยังไม่เช็คอิน'
-        })`,
-      );
+        emailSent
+          ? `✔ อัปเดตข้อมูลและส่งตั๋วใหม่ไปยังอีเมลผู้จองเรียบร้อยแล้ว (ที่นั่ง ${seatTextOf({
+              seats: newSeats,
+            })} · ${dateLabelOfKey(newDate)})`
+          : `✔ แก้ไขตั๋ว ${ticket.ticketCode} สำเร็จ (ที่นั่ง ${seatTextOf({
+              seats: newSeats,
+            })} · ${dateLabelOfKey(newDate)} · ${
+              editCheckedIn ? 'เช็คอินแล้ว' : 'ยังไม่เช็คอิน'
+            }${updated && updated.email ? ' · ส่งอีเมลไม่สำเร็จ' : ''})`
+          );
       setEditingTicket(null);
     } catch (err) {
       const msg = err.message || '';
@@ -897,7 +933,7 @@ export default function StaffDashboard() {
                   disabled={editBusy}
                   className="flex-1 rounded-xl bg-neon-cyan py-3 font-bold text-dark shadow-neon-cyan transition hover:brightness-110 disabled:opacity-50"
                 >
-                  {editBusy ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}
+                  {editBusy ? 'กำลังบันทึกและส่งอีเมลแจ้งเตือน...' : 'บันทึกการแก้ไข'}
                 </button>
               </div>
             </form>
