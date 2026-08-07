@@ -58,15 +58,37 @@ export const ZONES = [
 ];
 
 export const AUDIENCE_TYPES = [
-  { value: 'school', label: 'นักเรียนในโรงเรียน' },
+  { value: 'school', label: 'นักเรียนโรงเรียนฤทธิณรงค์รอน' },
+  { value: 'elementary', label: 'นักเรียนโรงเรียนประถม' },
   { value: 'other_school', label: 'นักเรียนจากโรงเรียนอื่น' },
-  { value: 'public', label: 'ผู้ปกครอง / บุคคลทั่วไป' },
-  { value: 'teacher', label: 'ครู / มหาวิทยาลัย' },
+  { value: 'guardian', label: 'ผู้ปกครอง / ศิษย์เก่า' },
+  { value: 'teacher', label: 'ครู / อาจารย์มหาวิทยาลัย / บุคคลทั่วไป' },
 ];
+
+export const AUDIENCE_DATE_LOCK = {
+  school: '2026-08-18',
+  elementary: '2026-08-17',
+  guardian: '2026-08-19',
+};
+
+export function lockedDateFor(audienceType) {
+  return AUDIENCE_DATE_LOCK[audienceType] || null;
+}
+
+const LEGACY_AUDIENCE_LABELS = { public: 'ผู้ปกครอง / บุคคลทั่วไป' };
 
 export function audienceLabel(value) {
   const found = AUDIENCE_TYPES.find((t) => t.value === value);
-  return found ? found.label : value;
+  return found ? found.label : LEGACY_AUDIENCE_LABELS[value] || value;
+}
+
+export function getTodayKey() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 export function buildSeatList() {

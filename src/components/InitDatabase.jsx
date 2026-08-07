@@ -18,6 +18,8 @@ export default function InitDatabase() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
+  const [bookingOpen, setBookingOpen] = useState(null);
+  const [bookingBusy, setBookingBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -38,6 +40,24 @@ export default function InitDatabase() {
     };
   }, [configured]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadBookingStatus() {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'bookingStatus'));
+        const open = snap.exists() ? snap.data().open !== false : true;
+        if (active) setBookingOpen(open);
+      } catch (err) {
+        console.error(err);
+        if (active) setBookingOpen(true);
+      }
+    }
+    if (configured) loadBookingStatus();
+    return () => {
+      active = false;
+    };
+  }, [configured]);
+
   function handleLogin(e) {
     e.preventDefault();
     if (passwordInput === (storedPassword || DEFAULT_PASSWORD)) {
@@ -46,6 +66,26 @@ export default function InitDatabase() {
       setPasswordInput('');
     } else {
       setAuthError(true);
+    }
+  }
+
+  async function toggleBooking() {
+    setBookingBusy(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await setDoc(doc(db, 'settings', 'bookingStatus'), { open: !bookingOpen });
+      setBookingOpen(!bookingOpen);
+      setMessage(
+        bookingOpen
+          ? 'ปิดระบบการจองแล้ว หน้าบ้านผู้ใช้จะเห็นข้อความ "ปิดรับการจองชั่วคราว"'
+          : 'เปิดระบบการจองแล้ว ผู้ใช้สามารถจองได้ตามปกติ',
+      );
+    } catch (err) {
+      console.error(err);
+      setError('ไม่สามารถเปลี่ยนสถานะการจองได้: ' + err.message);
+    } finally {
+      setBookingBusy(false);
     }
   }
 
@@ -236,6 +276,47 @@ export default function InitDatabase() {
         {error && (
           <p className="mt-4 rounded-xl border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-300">
             {error}
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-neon-cyan drop-shadow-[0_0_8px_rgba(0,229,255,0.7)]">
+              ⏸️ เปิด / ปิด ระบบการจอง
+            </h3>
+            <p className="mt-1 text-xs text-white/50">
+              เมื่อปิด หน้าบ้านฝั่งผู้ใช้จะแสดงข้อความ "ปิดรับการจองชั่วคราว"
+              และซ่อนแบบฟอร์มการจอง
+            </p>
+          </div>
+          {bookingOpen === null ? (
+            <span className="text-xs text-white/40">กำลังโหลด...</span>
+          ) : (
+            <button
+              type="button"
+              onClick={toggleBooking}
+              disabled={!configured || bookingBusy}
+              className={`relative h-8 w-16 rounded-full transition ${
+                bookingOpen ? 'bg-emerald-500' : 'bg-red-500'
+              } disabled:opacity-40`}
+              aria-label={bookingOpen ? 'ปิดการจอง' : 'เปิดการจอง'}
+            >
+              <span
+                className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all ${
+                  bookingOpen ? 'left-9' : 'left-1'
+                }`}
+              />
+            </button>
+          )}
+        </div>
+        {bookingOpen !== null && (
+          <p className="mt-3 text-sm">
+            สถานะปัจจุบัน:{' '}
+            <b className={bookingOpen ? 'text-emerald-300' : 'text-red-300'}>
+              {bookingOpen ? '🟢 เปิดรับการจอง' : '🔴 ปิดรับการจอง'}
+            </b>
           </p>
         )}
       </div>

@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, onSnapshot, runTransaction } from 'firebase/firestore';
+import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { db, isFirebaseConfigured } from '../firebase';
 import {
   audienceLabel,
+  bookedAtFieldFor,
+  bookedByFieldFor,
+  audienceFieldFor,
   dateKeyOfLabel,
+  dateLabelOfKey,
+  getTodayKey,
   seatStatus,
   statusFieldFor,
+  SHOW_DATES,
   EVENT,
 } from '../config';
 
@@ -34,6 +40,13 @@ export default function StaffDashboard() {
   const [filterDate, setFilterDate] = useState(FILTER_DATES[0]);
   const [actingCode, setActingCode] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [checkinError, setCheckinError] = useState(null);
+  const [editingTicket, setEditingTicket] = useState(null);
+  const [editDate, setEditDate] = useState(SHOW_DATES[0].key);
+  const [editSeatsText, setEditSeatsText] = useState('');
+  const [editError, setEditError] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editCheckedIn, setEditCheckedIn] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [manualCode, setManualCode] = useState('');
@@ -69,6 +82,8 @@ export default function StaffDashboard() {
     const trimmed = String(code || '').trim();
     if (!trimmed) return;
     setQuery(trimmed);
+    setCheckinError(null);
+    setNotice(null);
     const ticket = ticketsRef.current.find((t) => t.ticketCode === trimmed);
     if (ticket) {
       await handleCheckIn(ticket);
@@ -141,7 +156,7 @@ export default function StaffDashboard() {
       collection(db, 'seats'),
       (snap) => {
         const list = [];
-        snap.forEach((d) => list.push(d.data()));
+        snap.forEach((d) => list.push({ ...d.data(), id: d.id }));
         setSeats(list);
       },
       (err) => {
@@ -197,6 +212,17 @@ export default function StaffDashboard() {
   async function handleCheckIn(ticket) {
     setActingCode(ticket.ticketCode);
     setNotice(null);
+    setCheckinError(null);
+    const todayKey = getTodayKey();
+    if (ticket.showDateKey && ticket.showDateKey !== todayKey) {
+      setCheckinError(
+        `ไม่สามารถเช็คอินได้ เนื่องจากตั๋วระบุวันที่ ${
+          ticket.showDate || ticket.showDateKey
+        } ไม่ตรงกับรอบการแสดงวันนี้ (${dateLabelOfKey(todayKey)})`,
+      );
+      setActingCode(null);
+      return;
+    }
     try {
       const ticketRef = doc(db, 'tickets', ticket.ticketCode);
       const seatIds = seatListOf(ticket);
@@ -234,6 +260,122 @@ export default function StaffDashboard() {
       setNotice(`✔ คัดลอกเบอร์ ${phone} แล้ว`);
     } catch (err) {
       setNotice('ไม่สามารถคัดลอกเบอร์ได้');
+    }
+  }
+
+  function openEdit(ticket) {
+    setEditingTicket(ticket);
+    setEditDate(ticket.showDateKey || SHOW_DATES[0].key);
+    setEditSeatsText(seatListOf(ticket).join(', '));
+    setEditCheckedIn(Boolean(ticket.isCheckedIn));
+    setEditError(null);
+  }
+
+  function resolveSeatIds(text) {
+    const byNorm = new Map(
+      seats.map((s) => [String(s.id).replace(/-/g, ''), s.id]),
+    );
+    const tokens = String(text || '')
+      .split(/[\s,]+/)
+      .map((t) => t.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+      .filter(Boolean);
+    const ids = [];
+    const notFound = [];
+    tokens.forEach((tok) => {
+      const id = byNorm.get(tok);
+      if (id) ids.push(id);
+      else notFound.push(tok);
+    });
+    return { ids, notFound };
+  }
+
+  async function handleEditSave(e) {
+    e.preventDefault();
+    const ticket = editingTicket;
+    if (!ticket) return;
+    const { ids: newSeats, notFound } = resolveSeatIds(editSeatsText);
+    if (!newSeats.length) {
+      setEditError('กรุณาระบุหมายเลขที่นั่งอย่างน้อย 1 ที่');
+      return;
+    }
+    if (notFound.length) {
+      setEditError(`ไม่พบที่นั่ง ${notFound.join(', ')} ในระบบ`);
+      return;
+    }
+    const newDate = editDate;
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      await runTransaction(db, async (txn) => {
+        const tSnap = await txn.get(doc(db, 'tickets', ticket.ticketCode));
+        if (!tSnap.exists()) throw new Error('NOT_FOUND');
+        const t = tSnap.data();
+        const oldSeats = seatListOf(t);
+        const oldDate = t.showDateKey;
+        const staying = new Set(oldSeats.filter((s) => newSeats.includes(s)));
+        for (const sid of newSeats) {
+          if (oldDate === newDate && staying.has(sid)) continue;
+          const sSnap = await txn.get(doc(db, 'seats', sid));
+          if (!sSnap.exists()) throw new Error(`SEAT_NOT_FOUND:${sid}`);
+          if (seatStatus(sSnap.data(), newDate) !== 'available') {
+            throw new Error(`SEAT_TAKEN:${sid}`);
+          }
+        }
+        const bookedAt = serverTimestamp();
+        const newStatus = editCheckedIn ? 'checkedin' : 'booked';
+        const union = [...new Set([...oldSeats, ...newSeats])];
+        for (const sid of union) {
+          const ref = doc(db, 'seats', sid);
+          const usedNew = newSeats.includes(sid);
+          const upd = {};
+          if (usedNew) {
+            upd[statusFieldFor(newDate)] = newStatus;
+            upd[bookedByFieldFor(newDate)] = t.name;
+            upd[audienceFieldFor(newDate)] = t.audienceType;
+            upd[bookedAtFieldFor(newDate)] = bookedAt;
+          }
+          if (oldDate !== newDate || !usedNew) {
+            upd[statusFieldFor(oldDate)] = 'available';
+            upd[bookedByFieldFor(oldDate)] = null;
+            upd[audienceFieldFor(oldDate)] = null;
+            upd[bookedAtFieldFor(oldDate)] = null;
+          }
+          txn.update(ref, upd);
+        }
+        const zones = newSeats.map((sid) => {
+          const s = seats.find((x) => x.id === sid);
+          return s ? s.zone : String(sid).charAt(0);
+        });
+        txn.update(doc(db, 'tickets', ticket.ticketCode), {
+          showDateKey: newDate,
+          showDate: dateLabelOfKey(newDate),
+          seats: newSeats,
+          zones,
+          isCheckedIn: editCheckedIn,
+          checkedInAt: editCheckedIn
+            ? t.checkedInAt || new Date().toISOString()
+            : null,
+        });
+      });
+      setNotice(
+        `✔ แก้ไขตั๋ว ${ticket.ticketCode} สำเร็จ (ที่นั่ง ${seatTextOf({
+          seats: newSeats,
+        })} · ${dateLabelOfKey(newDate)} · ${
+          editCheckedIn ? 'เช็คอินแล้ว' : 'ยังไม่เช็คอิน'
+        })`,
+      );
+      setEditingTicket(null);
+    } catch (err) {
+      const msg = err.message || '';
+      if (msg.startsWith('SEAT_TAKEN')) {
+        setEditError(`ที่นั่ง ${msg.split(':')[1]} ถูกจองแล้ว ไม่สามารถย้ายไปได้`);
+      } else if (msg.startsWith('SEAT_NOT_FOUND')) {
+        setEditError(`ไม่พบที่นั่ง ${msg.split(':')[1]} ในระบบ`);
+      } else {
+        setEditError('เกิดข้อผิดพลาดในการแก้ไข กรุณาลองใหม่อีกครั้ง');
+      }
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -298,7 +440,6 @@ export default function StaffDashboard() {
           <form onSubmit={handlePinSubmit} className="mt-5 space-y-3">
             <input
               type="password"
-              inputMode="numeric"
               value={pinInput}
               onChange={(e) => {
                 setPinInput(e.target.value);
@@ -381,6 +522,12 @@ export default function StaffDashboard() {
       {notice && (
         <div className="rounded-2xl border border-emerald-400/40 bg-emerald-400/10 p-4 text-sm text-emerald-300">
           {notice}
+        </div>
+      )}
+
+      {checkinError && (
+        <div className="rounded-2xl border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-300">
+          ⛔ {checkinError}
         </div>
       )}
 
@@ -573,7 +720,8 @@ export default function StaffDashboard() {
                     <th className="py-2 pr-2 font-medium">อีเมล</th>
                     <th className="py-2 pr-2 font-medium">กลุ่มเป้าหมาย</th>
                     <th className="py-2 pr-2 font-medium">ที่นั่ง</th>
-                    <th className="py-2 font-medium">เช็คอิน</th>
+                    <th className="py-2 pr-2 font-medium">เช็คอิน</th>
+                    <th className="py-2 font-medium">จัดการ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -616,12 +764,144 @@ export default function StaffDashboard() {
                           </span>
                         )}
                       </td>
+                      <td className="py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => openEdit(t)}
+                          className="rounded-lg border border-white/20 px-2.5 py-1 text-xs text-white/70 transition hover:bg-white/10 hover:text-white"
+                        >
+                          ✏️ แก้ไข
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {editingTicket && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center">
+          <div className="w-full max-w-md rounded-t-3xl border border-neon-cyan/40 bg-dark p-6 shadow-neon-cyan sm:rounded-3xl">
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-neon-cyan drop-shadow-[0_0_8px_rgba(0,229,255,0.8)]">
+                  ✏️ แก้ไขตั๋ว
+                </h2>
+                <p className="mt-1 text-sm text-white/60">
+                  รหัสตั๋ว:{' '}
+                  <span className="font-mono font-bold text-neon-yellow">
+                    {editingTicket.ticketCode}
+                  </span>
+                  <br />
+                  ผู้จอง: <b className="text-white">{editingTicket.name}</b>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingTicket(null)}
+                className="rounded-full border border-white/20 px-3 py-1 text-white/60 transition hover:bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSave} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-xs text-white/60">รอบวันแสดง (ย้ายวัน)</label>
+                <select
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-neon-cyan"
+                >
+                  {SHOW_DATES.map((d) => (
+                    <option key={d.key} value={d.key} className="bg-dark">
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-white/60">
+                  หมายเลขที่นั่ง (ย้ายที่นั่ง) · คั่นด้วยเครื่องหมายจุลภาค เช่น A01, A02
+                </label>
+                <input
+                  value={editSeatsText}
+                  onChange={(e) => setEditSeatsText(e.target.value)}
+                  placeholder="เช่น A01, A02"
+                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-white/30 outline-none transition focus:border-neon-cyan"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-white/60">
+                  สถานะเช็คอิน (กรณีสแกนผิดพลาด)
+                </label>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={editCheckedIn}
+                  onClick={() => setEditCheckedIn((v) => !v)}
+                  className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 transition ${
+                    editCheckedIn
+                      ? 'border-emerald-400/50 bg-emerald-400/10'
+                      : 'border-white/20 bg-white/5'
+                  }`}
+                >
+                  <span className="text-sm">
+                    {editCheckedIn ? (
+                      <span className="font-bold text-emerald-300">✅ เช็คอินแล้ว</span>
+                    ) : (
+                      <span className="text-white/70">ยังไม่เช็คอิน</span>
+                    )}
+                  </span>
+                  <span
+                    className={`relative h-7 w-12 rounded-full transition ${
+                      editCheckedIn ? 'bg-emerald-500' : 'bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                        editCheckedIn ? 'left-6' : 'left-1'
+                      }`}
+                    />
+                  </span>
+                </button>
+              </div>
+
+              <p className="rounded-xl border border-white/10 bg-dark/60 p-3 text-xs text-white/50">
+                ⚠️ ระบบจะเช็กสถานะที่นั่งใหม่ (วันที่ย้ายไป) ก่อนบันทึก —
+                หากที่นั่งถูกจองแล้วจะไม่สามารถย้ายได้ และที่นั่งเดิมจะถูกปล่อยให้ว่าง
+              </p>
+
+              {editError && (
+                <p className="rounded-xl border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-300">
+                  {editError}
+                </p>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingTicket(null)}
+                  disabled={editBusy}
+                  className="flex-1 rounded-xl border border-white/20 py-3 text-white/70 transition hover:bg-white/10 disabled:opacity-50"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  disabled={editBusy}
+                  className="flex-1 rounded-xl bg-neon-cyan py-3 font-bold text-dark shadow-neon-cyan transition hover:brightness-110 disabled:opacity-50"
+                >
+                  {editBusy ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

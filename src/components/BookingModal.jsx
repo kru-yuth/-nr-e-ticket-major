@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AUDIENCE_TYPES, dateLabelOfKey } from '../config';
+import { audienceLabel, dateLabelOfKey } from '../config';
 
 function getSeatId(seat) {
   return seat.id || seat.seatId;
@@ -12,6 +12,7 @@ function formatSeatId(seat) {
 export default function BookingModal({
   seats,
   selectedDate,
+  audienceType,
   submitting,
   errorMessage,
   onClose,
@@ -20,7 +21,6 @@ export default function BookingModal({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [audienceType, setAudienceType] = useState(AUDIENCE_TYPES[0].value);
   const [nameError, setNameError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [phoneError, setPhoneError] = useState('');
@@ -122,25 +122,17 @@ export default function BookingModal({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-white/60">รอบวันแสดง</label>
-            <p className="rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-3 text-sm font-bold text-neon-cyan">
-              🎭 {dateLabelOfKey(selectedDate)}
+            <label className="mb-1 block text-xs text-white/60">กลุ่มผู้ชม</label>
+            <p className="rounded-xl border border-neon-pink/40 bg-neon-pink/10 px-4 py-3 text-sm font-bold text-neon-pink">
+              👥 {audienceLabel(audienceType)}
             </p>
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-white/60">คุณเป็นใครในกลุ่มเป้าหมาย *</label>
-            <select
-              value={audienceType}
-              onChange={(e) => setAudienceType(e.target.value)}
-              className="w-full appearance-none rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-neon-cyan focus:shadow-neon-cyan"
-            >
-              {AUDIENCE_TYPES.map((type) => (
-                <option key={type.value} value={type.value} className="bg-dark">
-                  {type.label}
-                </option>
-              ))}
-            </select>
+            <label className="mb-1 block text-xs text-white/60">รอบวันแสดง</label>
+            <p className="rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 py-3 text-sm font-bold text-neon-cyan">
+              🎭 {dateLabelOfKey(selectedDate)}
+            </p>
           </div>
 
           {errorMessage && (
